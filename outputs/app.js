@@ -137,6 +137,7 @@ const els = {
   jsonFileInput: document.querySelector("#jsonFileInput"),
   clearAll: document.querySelector("#clearAll"),
   resetSample: document.querySelector("#resetSample"),
+  exportLogs: document.querySelector("#exportLogs"),
   clearLogs: document.querySelector("#clearLogs"),
   logTable: document.querySelector("#logTable"),
   logEmpty: document.querySelector("#logEmpty"),
@@ -1220,6 +1221,69 @@ function exportMonthToExcel() {
   URL.revokeObjectURL(url);
 }
 
+function exportLogsToExcel() {
+  const logs = normalizeLogs(state.logs).sort((a, b) => new Date(b.at) - new Date(a.at));
+  const rows = logs.map((log, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(formatDateTime(log.at))}</td>
+        <td>${escapeHtml(log.user)}</td>
+        <td>${escapeHtml(log.device)}</td>
+        <td>${escapeHtml(log.userType)}</td>
+        <td>${escapeHtml(logActionLabel(log.action))}</td>
+        <td>${escapeHtml(log.detail || "-")}</td>
+      </tr>
+    `).join("");
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Tahoma, Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #b8c4bf; padding: 8px; text-align: left; }
+          th { background: #2f7d78; color: #ffffff; }
+          .summary th { background: #e8eeea; color: #1e2b2a; }
+        </style>
+      </head>
+      <body>
+        <h2>CompanyExpenses Audit Log</h2>
+        <table class="summary">
+          <tr><th>Exported At</th><td>${escapeHtml(formatDateTime(new Date().toISOString()))}</td></tr>
+          <tr><th>Total Logs</th><td>${logs.length}</td></tr>
+        </table>
+        <br>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>เวลา</th>
+              <th>User</th>
+              <th>Device</th>
+              <th>Type</th>
+              <th>Action</th>
+              <th>รายละเอียด</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || "<tr><td colspan=\"7\">ยังไม่มี Audit Log</td></tr>"}
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `;
+  const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `companyexpenses-audit-log-${isoDate(today)}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function backupStateToJson() {
   const payload = {
     app: "expense-ledger-dashboard",
@@ -1458,6 +1522,7 @@ els.listNext.addEventListener("click", () => {
   renderTable();
 });
 els.exportExcel.addEventListener("click", exportMonthToExcel);
+els.exportLogs.addEventListener("click", exportLogsToExcel);
 els.backupJson.addEventListener("click", backupStateToJson);
 els.uploadJson.addEventListener("click", () => els.jsonFileInput.click());
 els.jsonFileInput.addEventListener("change", (event) => uploadJsonBackup(event.target.files[0]));
