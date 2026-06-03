@@ -3,6 +3,18 @@ const AUTH_KEY = "expense-ledger-auth-v1";
 const SESSION_KEY = "expense-ledger-session-v1";
 const IP_CACHE_KEY = "expense-ledger-client-ip-v1";
 const IP_LOOKUP_URL = "https://api.ipify.org?format=json";
+const FIRESTORE_COLLECTION = "companyExpenses";
+const FIRESTORE_STATE_DOC = "state";
+const FIRESTORE_AUTH_DOC = "auth";
+const firebaseConfig = {
+  apiKey: "AIzaSyD7PHq2fYh8PpgtxLaV6DCRPSHZqYFHjpA",
+  authDomain: "companyexpenses-3d15b.firebaseapp.com",
+  projectId: "companyexpenses-3d15b",
+  storageBucket: "companyexpenses-3d15b.firebasestorage.app",
+  messagingSenderId: "6122333373",
+  appId: "1:6122333373:web:d881b5681f16256f9a43d4",
+  measurementId: "G-NTSP8DVBY7"
+};
 const DEFAULT_AUTH = Object.freeze({
   username: "admin",
   salt: "expense-ledger-default",
@@ -57,6 +69,12 @@ const sampleExpenses = [
 let state = loadState();
 let listPage = 1;
 let clientIp = loadCachedClientIp();
+let firebaseDb = null;
+let firebaseSyncReady = false;
+let applyingRemoteUpdate = false;
+let remoteWriteQueue = Promise.resolve();
+let unsubscribeState = null;
+let unsubscribeAuth = null;
 
 const els = {
   loginScreen: document.querySelector("#loginScreen"),
@@ -178,8 +196,13 @@ function loadState() {
   }
 }
 
-function saveState() {
+function cacheState(nextState = state) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+}
+
+function saveState({ remote = true } = {}) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (remote && !applyingRemoteUpdate) queueRemoteStateSave();
 }
 
 function createId(prefix) {
@@ -309,22 +332,28 @@ function loadAuth() {
   const raw = localStorage.getItem(AUTH_KEY);
   if (!raw) {
     const auth = defaultAuthState();
-    saveAuth(auth);
+    saveAuth(auth, { remote: false });
     return auth;
   }
   try {
     const auth = normalizeAuth(JSON.parse(raw));
-    saveAuth(auth);
+    saveAuth(auth, { remote: false });
     return auth;
   } catch {
     const auth = defaultAuthState();
-    saveAuth(auth);
+    saveAuth(auth, { remote: false });
     return auth;
   }
 }
 
-function saveAuth(auth) {
+function cacheAuth(auth) {
   localStorage.setItem(AUTH_KEY, JSON.stringify(normalizeAuth(auth)));
+}
+
+function saveAuth(auth, { remote = true } = {}) {
+  const normalized = normalizeAuth(auth);
+  localStorage.setItem(AUTH_KEY, JSON.stringify(normalized));
+  if (remote && !applyingRemoteUpdate) queueRemoteAuthSave(normalized);
 }
 
 function findUserByUsername(username, auth = loadAuth()) {
@@ -390,6 +419,131 @@ function requireAuth() {
   }
   clearSession();
   showLogin();
+}
+
+function initFirebaseDb() {
+  if (firebaseDb) return firebaseDb;
+  if (!globalThis.firebase?.initializeApp || !globalThis.firebase?.firestore) {
+    console.warn("Firebase SDK not loaded; using local browser storage only.");
+    return null;
+  }
+  try {
+    const app = firebase.apps?.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
+    firebaseDb = app.firestore();
+    return firebaseDb;
+  } catch (error) {
+    console.warn("Firebase init failed; using local browser storage only.", error);
+    return null;
+  }
+}
+
+function firestoreDoc(id) {
+  const db = initFirebaseDb();
+  return db ? db.collection(FIRESTORE_COLLECTION).doc(id) : null;
+}
+
+function serverTimestamp() {
+  return globalThis.firebase?.firestore?.FieldValue?.serverTimestamp
+    ? firebase.firestore.FieldValue.serverTimestamp()
+    : new Date().toISOString();
+}
+
+function queueRemoteStateSave() {
+  const ref = firestoreDoc(FIRESTORE_STATE_DOC);
+  if (!ref) return;
+  const payload = normalizeBackupData(state) || defaultState();
+  remoteWriteQueue = remoteWriteQueue
+    .then(() => ref.set({
+      data: payload,
+      updatedAt: serverTimestamp()
+    }, { merge: true }))
+    .catch((error) => console.warn("Firebase state save failed.", error));
+}
+
+function queueRemoteAuthSave(auth = loadAuth()) {
+  const ref = firestoreDoc(FIRESTORE_AUTH_DOC);
+  if (!ref) return;
+  const payload = normalizeAuth(auth);
+  remoteWriteQueue = remoteWriteQueue
+    .then(() => ref.set({
+      data: payload,
+      updatedAt: serverTimestamp()
+    }, { merge: true }))
+    .catch((error) => console.warn("Firebase auth save failed.", error));
+}
+
+async function loadRemoteState() {
+  const ref = firestoreDoc(FIRESTORE_STATE_DOC);
+  if (!ref) return;
+  const snapshot = await ref.get();
+  if (snapshot.exists) {
+    const remoteState = normalizeBackupData(snapshot.data()?.data);
+    if (remoteState) {
+      applyingRemoteUpdate = true;
+      state = remoteState;
+      cacheState(state);
+      applyingRemoteUpdate = false;
+      return;
+    }
+  }
+  queueRemoteStateSave();
+}
+
+async function loadRemoteAuth() {
+  const ref = firestoreDoc(FIRESTORE_AUTH_DOC);
+  if (!ref) return;
+  const snapshot = await ref.get();
+  if (snapshot.exists) {
+    const remoteAuth = normalizeAuth(snapshot.data()?.data);
+    applyingRemoteUpdate = true;
+    cacheAuth(remoteAuth);
+    applyingRemoteUpdate = false;
+    return;
+  }
+  queueRemoteAuthSave(loadAuth());
+}
+
+function subscribeRemoteData() {
+  const stateRef = firestoreDoc(FIRESTORE_STATE_DOC);
+  const authRef = firestoreDoc(FIRESTORE_AUTH_DOC);
+  if (!stateRef || !authRef) return;
+  unsubscribeState?.();
+  unsubscribeAuth?.();
+  unsubscribeState = stateRef.onSnapshot((snapshot) => {
+    const remoteState = snapshot.exists ? normalizeBackupData(snapshot.data()?.data) : null;
+    if (!remoteState) return;
+    applyingRemoteUpdate = true;
+    state = remoteState;
+    cacheState(state);
+    applyingRemoteUpdate = false;
+    if (!els.appShell.classList.contains("is-hidden")) render();
+  }, (error) => console.warn("Firebase state sync failed.", error));
+  unsubscribeAuth = authRef.onSnapshot((snapshot) => {
+    const remoteAuth = snapshot.exists ? normalizeAuth(snapshot.data()?.data) : null;
+    if (!remoteAuth) return;
+    applyingRemoteUpdate = true;
+    cacheAuth(remoteAuth);
+    applyingRemoteUpdate = false;
+    if (!isLoggedIn()) {
+      clearSession();
+      showLogin();
+      return;
+    }
+    if (!els.appShell.classList.contains("is-hidden")) syncAccountInputs();
+  }, (error) => console.warn("Firebase auth sync failed.", error));
+}
+
+async function initializeFirebaseSync() {
+  try {
+    if (!initFirebaseDb()) return;
+    await loadRemoteAuth();
+    await loadRemoteState();
+    subscribeRemoteData();
+    firebaseSyncReady = true;
+  } catch (error) {
+    firebaseSyncReady = false;
+    console.warn("Firebase sync unavailable; using local browser storage only.", error);
+  }
 }
 
 function defaultState() {
@@ -1771,4 +1925,4 @@ function shiftMonth(delta) {
   render();
 }
 
-requireAuth();
+initializeFirebaseSync().finally(requireAuth);
