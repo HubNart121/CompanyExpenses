@@ -162,6 +162,27 @@
 
           <div class="account-box">
             <h2>บัญชีผู้ใช้</h2>
+            <div class="account-section">
+              <h3>สร้างบัญชีใหม่</h3>
+              <form id="createUserForm" class="form-stack" novalidate>
+                <label>
+                  Username
+                  <input id="createUsernameInput" type="text" autocomplete="off" required>
+                </label>
+                <label>
+                  Password
+                  <input id="createPasswordInput" type="password" autocomplete="new-password" required>
+                </label>
+                <label>
+                  ยืนยัน Password
+                  <input id="createConfirmPasswordInput" type="password" autocomplete="new-password" required>
+                </label>
+                <button class="primary-button" type="submit">สร้างบัญชี</button>
+                <p id="createUserMessage" class="budget-hint" aria-live="polite"></p>
+              </form>
+            </div>
+            <div class="account-section">
+              <h3>แก้ไขบัญชีปัจจุบัน</h3>
             <form id="accountForm" class="form-stack" novalidate>
               <label>
                 Username ใหม่
@@ -182,6 +203,11 @@
               <button class="primary-button" type="submit">บันทึกบัญชี</button>
               <p id="accountMessage" class="budget-hint" aria-live="polite"></p>
             </form>
+            </div>
+            <div class="account-section">
+              <h3>ผู้ใช้ทั้งหมด</h3>
+              <div id="userList" class="user-list" aria-live="polite"></div>
+            </div>
           </div>
 
           <div class="status-box">

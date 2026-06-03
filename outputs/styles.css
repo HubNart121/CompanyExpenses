@@ -366,6 +366,64 @@ label select {
   margin-top: 12px;
 }
 
+.account-section {
+  margin-top: 16px;
+}
+
+.account-section h3 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.user-list {
+  display: grid;
+  gap: 8px;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.user-row.current {
+  border-color: rgba(47, 125, 120, 0.42);
+  background: #f4faf8;
+}
+
+.user-name {
+  color: var(--ink);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.user-meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.user-row button {
+  min-height: 34px;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #f8eeee;
+  color: var(--red);
+}
+
+.user-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .budget-form {
   display: grid;
   gap: 10px;
@@ -819,6 +877,11 @@ td.amount-col {
 
   .row-actions {
     flex-wrap: wrap;
+  }
+
+  .user-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

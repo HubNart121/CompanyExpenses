@@ -104,12 +104,18 @@ const els = {
   budgetInput: document.querySelector("#budgetInput"),
   clearBudget: document.querySelector("#clearBudget"),
   budgetHint: document.querySelector("#budgetHint"),
+  createUserForm: document.querySelector("#createUserForm"),
+  createUsernameInput: document.querySelector("#createUsernameInput"),
+  createPasswordInput: document.querySelector("#createPasswordInput"),
+  createConfirmPasswordInput: document.querySelector("#createConfirmPasswordInput"),
+  createUserMessage: document.querySelector("#createUserMessage"),
   accountForm: document.querySelector("#accountForm"),
   newUsernameInput: document.querySelector("#newUsernameInput"),
   currentPasswordInput: document.querySelector("#currentPasswordInput"),
   newPasswordInput: document.querySelector("#newPasswordInput"),
   confirmPasswordInput: document.querySelector("#confirmPasswordInput"),
   accountMessage: document.querySelector("#accountMessage"),
+  userList: document.querySelector("#userList"),
   categoryForm: document.querySelector("#categoryForm"),
   categoryNameInput: document.querySelector("#categoryNameInput"),
   categoryColorInput: document.querySelector("#categoryColorInput"),
@@ -237,34 +243,97 @@ function createSalt() {
   return createId("salt");
 }
 
+function normalizeUsername(value) {
+  return String(value || "").trim();
+}
+
+function createAuthUser(username, password) {
+  const salt = createSalt();
+  return {
+    id: createId("user"),
+    username: normalizeUsername(username),
+    salt,
+    passwordHash: hashPassword(password, salt),
+    createdAt: new Date().toISOString()
+  };
+}
+
+function defaultAuthState() {
+  return {
+    version: 2,
+    users: [{
+      id: "user-admin",
+      username: DEFAULT_AUTH.username,
+      salt: DEFAULT_AUTH.salt,
+      passwordHash: DEFAULT_AUTH.passwordHash,
+      createdAt: "2026-06-03T00:00:00.000Z"
+    }]
+  };
+}
+
+function normalizeAuthUser(user, index) {
+  const username = normalizeUsername(user?.username);
+  if (!username || !user?.salt || !user?.passwordHash) return null;
+  return {
+    id: String(user.id || createId(`user-${index}`)),
+    username,
+    salt: String(user.salt),
+    passwordHash: String(user.passwordHash),
+    createdAt: Number.isNaN(Date.parse(user.createdAt)) ? new Date().toISOString() : String(user.createdAt)
+  };
+}
+
+function normalizeAuth(rawAuth) {
+  const sourceUsers = Array.isArray(rawAuth?.users)
+    ? rawAuth.users
+    : rawAuth?.username && rawAuth?.salt && rawAuth?.passwordHash
+      ? [rawAuth]
+      : defaultAuthState().users;
+  const seen = new Set();
+  const users = sourceUsers
+    .map(normalizeAuthUser)
+    .filter((user) => {
+      if (!user) return false;
+      const key = user.username.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return {
+    version: 2,
+    users: users.length ? users : defaultAuthState().users
+  };
+}
+
 function loadAuth() {
   const raw = localStorage.getItem(AUTH_KEY);
   if (!raw) {
-    saveAuth(DEFAULT_AUTH);
-    return { ...DEFAULT_AUTH };
+    const auth = defaultAuthState();
+    saveAuth(auth);
+    return auth;
   }
   try {
-    const auth = JSON.parse(raw);
-    if (auth?.username && auth?.passwordHash && auth?.salt) {
-      return {
-        username: String(auth.username),
-        passwordHash: String(auth.passwordHash),
-        salt: String(auth.salt)
-      };
-    }
+    const auth = normalizeAuth(JSON.parse(raw));
+    saveAuth(auth);
+    return auth;
   } catch {
-    // Fall back to the default account if the auth record is corrupted.
+    const auth = defaultAuthState();
+    saveAuth(auth);
+    return auth;
   }
-  saveAuth(DEFAULT_AUTH);
-  return { ...DEFAULT_AUTH };
 }
 
 function saveAuth(auth) {
-  localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+  localStorage.setItem(AUTH_KEY, JSON.stringify(normalizeAuth(auth)));
 }
 
-function verifyPassword(password, auth = loadAuth()) {
-  return hashPassword(password, auth.salt) === auth.passwordHash;
+function findUserByUsername(username, auth = loadAuth()) {
+  const target = normalizeUsername(username).toLowerCase();
+  return auth.users.find((user) => user.username.toLowerCase() === target) || null;
+}
+
+function verifyPassword(password, user) {
+  return Boolean(user?.salt && user?.passwordHash && hashPassword(password, user.salt) === user.passwordHash);
 }
 
 function currentSessionUser() {
@@ -280,23 +349,28 @@ function clearSession() {
 }
 
 function isLoggedIn() {
-  return currentSessionUser() === loadAuth().username;
+  return Boolean(findUserByUsername(currentSessionUser()));
 }
 
 function syncAccountInputs() {
   const auth = loadAuth();
-  els.currentUserLabel.textContent = auth.username;
-  els.newUsernameInput.value = auth.username;
+  const user = findUserByUsername(currentSessionUser(), auth) || auth.users[0];
+  els.currentUserLabel.textContent = user.username;
+  els.newUsernameInput.value = user.username;
   els.currentPasswordInput.value = "";
   els.newPasswordInput.value = "";
   els.confirmPasswordInput.value = "";
+  els.createUserForm.reset();
+  els.createUserMessage.textContent = "";
+  els.accountMessage.textContent = "";
+  renderUserList(auth);
 }
 
 function showLogin() {
   els.loginScreen.classList.remove("is-hidden");
   els.appShell.classList.add("is-hidden");
   els.loginPassword.value = "";
-  els.loginUsername.value = loadAuth().username;
+  els.loginUsername.value = currentSessionUser() || loadAuth().users[0]?.username || "";
   els.loginMessage.textContent = "";
   els.loginMessage.className = "auth-message";
   els.loginUsername.focus();
@@ -1113,6 +1187,47 @@ function renderLogs() {
   els.logEmpty.classList.toggle("show", rows.length === 0);
 }
 
+function renderUserList(auth = loadAuth()) {
+  const current = currentSessionUser();
+  els.userList.innerHTML = auth.users
+    .map((user) => {
+      const isCurrent = user.username === current;
+      const disableDelete = isCurrent || auth.users.length <= 1;
+      return `
+        <div class="user-row ${isCurrent ? "current" : ""}">
+          <div>
+            <span class="user-name">${escapeHtml(user.username)}</span>
+            <span class="user-meta">${isCurrent ? "กำลังใช้งาน" : "บัญชีผู้ใช้"} · ${escapeHtml(formatDateTime(user.createdAt))}</span>
+          </div>
+          <button type="button" data-delete-user="${escapeHtml(user.username)}" ${disableDelete ? "disabled" : ""}>ลบ</button>
+        </div>
+      `;
+    })
+    .join("");
+  els.userList.querySelectorAll("[data-delete-user]").forEach((button) => {
+    button.addEventListener("click", () => deleteUser(button.dataset.deleteUser));
+  });
+}
+
+function deleteUser(username) {
+  const auth = loadAuth();
+  const user = findUserByUsername(username, auth);
+  if (!user) return;
+  if (auth.users.length <= 1) {
+    alert("ต้องมีบัญชีผู้ใช้อย่างน้อย 1 บัญชี");
+    return;
+  }
+  if (user.username === currentSessionUser()) {
+    alert("ไม่สามารถลบบัญชีที่กำลังใช้งานอยู่");
+    return;
+  }
+  if (!confirm(`ต้องการลบบัญชี ${user.username} หรือไม่`)) return;
+  auth.users = auth.users.filter((item) => item.id !== user.id);
+  saveAuth(auth);
+  addLog("delete", `ลบบัญชีผู้ใช้: ${user.username}`);
+  renderUserList(loadAuth());
+}
+
 function startEdit(id) {
   const item = state.expenses.find((expense) => expense.id === id);
   if (!item) return;
@@ -1386,8 +1501,9 @@ els.loginForm.addEventListener("submit", async (event) => {
   const auth = loadAuth();
   const username = els.loginUsername.value.trim();
   const password = els.loginPassword.value;
-  if (username === auth.username && verifyPassword(password, auth)) {
-    setSession(auth.username);
+  const user = findUserByUsername(username, auth);
+  if (user && verifyPassword(password, user)) {
+    setSession(user.username);
     els.loginForm.reset();
     await refreshClientIp();
     addLog("login", "เข้าสู่ระบบ");
@@ -1404,9 +1520,43 @@ els.logoutButton.addEventListener("click", () => {
   showLogin();
 });
 
+els.createUserForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const auth = loadAuth();
+  const username = normalizeUsername(els.createUsernameInput.value);
+  const password = els.createPasswordInput.value;
+  const confirmPassword = els.createConfirmPasswordInput.value;
+
+  els.createUserMessage.textContent = "";
+  if (!username) {
+    els.createUserMessage.textContent = "กรุณากรอก Username";
+    return;
+  }
+  if (findUserByUsername(username, auth)) {
+    els.createUserMessage.textContent = "Username นี้มีอยู่แล้ว";
+    return;
+  }
+  if (password.length < 6) {
+    els.createUserMessage.textContent = "Password ควรมีอย่างน้อย 6 ตัวอักษร";
+    return;
+  }
+  if (password !== confirmPassword) {
+    els.createUserMessage.textContent = "ยืนยัน Password ไม่ตรงกัน";
+    return;
+  }
+
+  auth.users.push(createAuthUser(username, password));
+  saveAuth(auth);
+  els.createUserForm.reset();
+  els.createUserMessage.textContent = "สร้างบัญชีสำเร็จ";
+  addLog("edit", `สร้างบัญชีผู้ใช้: ${username}`);
+  renderUserList(loadAuth());
+});
+
 els.accountForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const auth = loadAuth();
+  const currentUser = findUserByUsername(currentSessionUser(), auth);
   const username = els.newUsernameInput.value.trim();
   const currentPassword = els.currentPasswordInput.value;
   const newPassword = els.newPasswordInput.value;
@@ -1417,7 +1567,17 @@ els.accountForm.addEventListener("submit", (event) => {
     els.accountMessage.textContent = "กรุณากรอก Username";
     return;
   }
-  if (!verifyPassword(currentPassword, auth)) {
+  if (!currentUser) {
+    els.accountMessage.textContent = "ไม่พบบัญชีที่กำลังใช้งาน";
+    requireAuth();
+    return;
+  }
+  const duplicateUser = findUserByUsername(username, auth);
+  if (duplicateUser && duplicateUser.id !== currentUser.id) {
+    els.accountMessage.textContent = "Username นี้มีอยู่แล้ว";
+    return;
+  }
+  if (!verifyPassword(currentPassword, currentUser)) {
     els.accountMessage.textContent = "Password เดิมไม่ถูกต้อง";
     return;
   }
@@ -1430,18 +1590,15 @@ els.accountForm.addEventListener("submit", (event) => {
     return;
   }
 
-  const nextAuth = {
-    username,
-    salt: auth.salt,
-    passwordHash: auth.passwordHash
-  };
+  const oldUsername = currentUser.username;
+  currentUser.username = username;
   if (newPassword) {
-    nextAuth.salt = createSalt();
-    nextAuth.passwordHash = hashPassword(newPassword, nextAuth.salt);
+    currentUser.salt = createSalt();
+    currentUser.passwordHash = hashPassword(newPassword, currentUser.salt);
   }
-  saveAuth(nextAuth);
-  setSession(nextAuth.username);
-  addLog("edit", `เปลี่ยนบัญชีผู้ใช้: ${auth.username} -> ${nextAuth.username}`);
+  saveAuth(auth);
+  setSession(currentUser.username);
+  addLog("edit", `เปลี่ยนบัญชีผู้ใช้: ${oldUsername} -> ${currentUser.username}`);
   syncAccountInputs();
   els.accountMessage.textContent = "บันทึกบัญชีสำเร็จ";
 });
