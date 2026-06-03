@@ -1,4 +1,11 @@
 const STORAGE_KEY = "expense-ledger-v1";
+const AUTH_KEY = "expense-ledger-auth-v1";
+const SESSION_KEY = "expense-ledger-session-v1";
+const DEFAULT_AUTH = Object.freeze({
+  username: "admin",
+  salt: "expense-ledger-default",
+  passwordHash: hashPassword("admin123", "expense-ledger-default")
+});
 
 const palette = ["#2f7d78", "#d29f35", "#6d7fb8", "#c95f5f", "#4f8d5f", "#8b6f4e", "#b05b87"];
 
@@ -49,6 +56,14 @@ let state = loadState();
 let listPage = 1;
 
 const els = {
+  loginScreen: document.querySelector("#loginScreen"),
+  appShell: document.querySelector("#appShell"),
+  loginForm: document.querySelector("#loginForm"),
+  loginUsername: document.querySelector("#loginUsername"),
+  loginPassword: document.querySelector("#loginPassword"),
+  loginMessage: document.querySelector("#loginMessage"),
+  currentUserLabel: document.querySelector("#currentUserLabel"),
+  logoutButton: document.querySelector("#logoutButton"),
   monthFilter: document.querySelector("#monthFilter"),
   prevMonth: document.querySelector("#prevMonth"),
   nextMonth: document.querySelector("#nextMonth"),
@@ -86,6 +101,12 @@ const els = {
   budgetInput: document.querySelector("#budgetInput"),
   clearBudget: document.querySelector("#clearBudget"),
   budgetHint: document.querySelector("#budgetHint"),
+  accountForm: document.querySelector("#accountForm"),
+  newUsernameInput: document.querySelector("#newUsernameInput"),
+  currentPasswordInput: document.querySelector("#currentPasswordInput"),
+  newPasswordInput: document.querySelector("#newPasswordInput"),
+  confirmPasswordInput: document.querySelector("#confirmPasswordInput"),
+  accountMessage: document.querySelector("#accountMessage"),
   categoryForm: document.querySelector("#categoryForm"),
   categoryNameInput: document.querySelector("#categoryNameInput"),
   categoryColorInput: document.querySelector("#categoryColorInput"),
@@ -116,6 +137,9 @@ const els = {
   jsonFileInput: document.querySelector("#jsonFileInput"),
   clearAll: document.querySelector("#clearAll"),
   resetSample: document.querySelector("#resetSample"),
+  clearLogs: document.querySelector("#clearLogs"),
+  logTable: document.querySelector("#logTable"),
+  logEmpty: document.querySelector("#logEmpty"),
   trendTitle: document.querySelector("#trendTitle"),
   trendLabel: document.querySelector("#trendLabel"),
   dailyChart: document.querySelector("#dailyChart"),
@@ -152,13 +176,109 @@ function createId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function hashPassword(password, salt) {
+  const text = `${salt}:${password}`;
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function createSalt() {
+  return createId("salt");
+}
+
+function loadAuth() {
+  const raw = localStorage.getItem(AUTH_KEY);
+  if (!raw) {
+    saveAuth(DEFAULT_AUTH);
+    return { ...DEFAULT_AUTH };
+  }
+  try {
+    const auth = JSON.parse(raw);
+    if (auth?.username && auth?.passwordHash && auth?.salt) {
+      return {
+        username: String(auth.username),
+        passwordHash: String(auth.passwordHash),
+        salt: String(auth.salt)
+      };
+    }
+  } catch {
+    // Fall back to the default account if the auth record is corrupted.
+  }
+  saveAuth(DEFAULT_AUTH);
+  return { ...DEFAULT_AUTH };
+}
+
+function saveAuth(auth) {
+  localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+}
+
+function verifyPassword(password, auth = loadAuth()) {
+  return hashPassword(password, auth.salt) === auth.passwordHash;
+}
+
+function currentSessionUser() {
+  return sessionStorage.getItem(SESSION_KEY) || "";
+}
+
+function setSession(username) {
+  sessionStorage.setItem(SESSION_KEY, username);
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+function isLoggedIn() {
+  return currentSessionUser() === loadAuth().username;
+}
+
+function syncAccountInputs() {
+  const auth = loadAuth();
+  els.currentUserLabel.textContent = auth.username;
+  els.newUsernameInput.value = auth.username;
+  els.currentPasswordInput.value = "";
+  els.newPasswordInput.value = "";
+  els.confirmPasswordInput.value = "";
+}
+
+function showLogin() {
+  els.loginScreen.classList.remove("is-hidden");
+  els.appShell.classList.add("is-hidden");
+  els.loginPassword.value = "";
+  els.loginUsername.value = loadAuth().username;
+  els.loginMessage.textContent = "";
+  els.loginMessage.className = "auth-message";
+  els.loginUsername.focus();
+}
+
+function showApp() {
+  els.loginScreen.classList.add("is-hidden");
+  els.appShell.classList.remove("is-hidden");
+  syncAccountInputs();
+  render();
+}
+
+function requireAuth() {
+  if (isLoggedIn()) {
+    showApp();
+    return;
+  }
+  clearSession();
+  showLogin();
+}
+
 function defaultState() {
   return {
     categories: sampleCategories.map((category) => ({ ...category })),
     statuses: sampleStatuses.map((status) => ({ ...status })),
     expenses: sampleExpenses.map((expense) => ({ ...expense })),
     annualBudgets: { [today.getFullYear()]: 144000 },
-    budgets: { [currentMonth]: 12000 }
+    budgets: { [currentMonth]: 12000 },
+    logs: []
   };
 }
 
@@ -174,7 +294,8 @@ function normalizeBackupData(data) {
     statuses,
     expenses: normalizeExpenseList(source.expenses, categories, statuses, fallbackCategory, fallbackStatus),
     annualBudgets: normalizeAnnualBudgets(source.annualBudgets),
-    budgets: normalizeBudgets(source.budgets)
+    budgets: normalizeBudgets(source.budgets),
+    logs: normalizeLogs(source.logs)
   };
 }
 
@@ -229,6 +350,19 @@ function normalizeAnnualBudgets(values) {
   return Object.fromEntries(Object.entries(values)
     .map(([key, value]) => [String(key), Number(value)])
     .filter(([key, value]) => /^\d{4}$/.test(key) && Number.isFinite(value) && value > 0));
+}
+
+function normalizeLogs(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((log, index) => ({
+      id: String(log?.id || createId(`log-${index}`)),
+      at: Number.isNaN(Date.parse(log?.at)) ? new Date().toISOString() : String(log.at),
+      user: String(log?.user || "system"),
+      action: String(log?.action || "edit"),
+      detail: String(log?.detail || "")
+    }))
+    .slice(0, 500);
 }
 
 function money(value) {
@@ -386,6 +520,7 @@ function render() {
   renderMetrics(visibleExpenses, range);
   renderCharts(visibleExpenses, range);
   renderTable();
+  renderLogs();
 }
 
 function renderMetrics(items, range) {
@@ -826,6 +961,53 @@ function resetListAndRender() {
   renderTable();
 }
 
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function logActionLabel(action) {
+  return {
+    login: "Login",
+    logout: "Logout",
+    edit: "Edit",
+    delete: "Delete"
+  }[action] || action;
+}
+
+function addLog(action, detail = "") {
+  state.logs = normalizeLogs(state.logs);
+  state.logs.unshift({
+    id: createId("log"),
+    at: new Date().toISOString(),
+    user: currentSessionUser() || "system",
+    action,
+    detail
+  });
+  state.logs = state.logs.slice(0, 500);
+  saveState();
+  renderLogs();
+}
+
+function renderLogs() {
+  const rows = normalizeLogs(state.logs).slice(0, 120);
+  els.logTable.innerHTML = rows
+    .map((log) => `
+      <tr>
+        <td data-label="เวลา">${escapeHtml(formatDateTime(log.at))}</td>
+        <td data-label="User">${escapeHtml(log.user)}</td>
+        <td data-label="Action"><span class="log-action">${escapeHtml(logActionLabel(log.action))}</span></td>
+        <td data-label="รายละเอียด">${escapeHtml(log.detail || "-")}</td>
+      </tr>
+    `)
+    .join("");
+  els.logEmpty.classList.toggle("show", rows.length === 0);
+}
+
 function startEdit(id) {
   const item = state.expenses.find((expense) => expense.id === id);
   if (!item) return;
@@ -851,12 +1033,15 @@ function clearEdit() {
 }
 
 function deleteExpense(id) {
+  const deleted = state.expenses.find((expense) => expense.id === id);
   state.expenses = state.expenses.filter((expense) => expense.id !== id);
   saveState();
+  if (deleted) addLog("delete", `ลบรายการ: ${deleted.title}`);
   render();
 }
 
 function deleteCategory(id) {
+  const category = state.categories.find((item) => item.id === id);
   const used = state.expenses.some((expense) => expense.categoryId === id);
   if (used) {
     alert("หมวดนี้ยังมีรายการค่าใช้จ่ายอยู่ กรุณาแก้ไขหรือลบรายการก่อน");
@@ -864,10 +1049,12 @@ function deleteCategory(id) {
   }
   state.categories = state.categories.filter((category) => category.id !== id);
   saveState();
+  if (category) addLog("delete", `ลบหมวดหมู่: ${category.name}`);
   render();
 }
 
 function deleteStatus(id) {
+  const statusItem = state.statuses.find((status) => status.id === id);
   if (state.statuses.length <= 1) {
     alert("ต้องมี Status อย่างน้อย 1 ค่า");
     return;
@@ -879,6 +1066,7 @@ function deleteStatus(id) {
   }
   state.statuses = state.statuses.filter((status) => status.id !== id);
   saveState();
+  if (statusItem) addLog("delete", `ลบ status: ${statusItem.name}`);
   render();
 }
 
@@ -1010,6 +1198,7 @@ function uploadJsonBackup(file) {
       if (!confirm("ต้องการนำเข้าไฟล์ JSON และเขียนทับข้อมูลปัจจุบันหรือไม่")) return;
       state = restoredState;
       saveState();
+      addLog("edit", "นำเข้า JSON backup");
       clearEdit();
       render();
       alert("นำเข้า JSON สำเร็จ");
@@ -1022,8 +1211,80 @@ function uploadJsonBackup(file) {
   reader.readAsText(file);
 }
 
+els.loginForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const auth = loadAuth();
+  const username = els.loginUsername.value.trim();
+  const password = els.loginPassword.value;
+  if (username === auth.username && verifyPassword(password, auth)) {
+    setSession(auth.username);
+    els.loginForm.reset();
+    addLog("login", "เข้าสู่ระบบ");
+    showApp();
+    return;
+  }
+  els.loginMessage.textContent = "Username หรือ Password ไม่ถูกต้อง";
+  els.loginMessage.className = "auth-message error";
+});
+
+els.logoutButton.addEventListener("click", () => {
+  addLog("logout", "ออกจากระบบ");
+  clearSession();
+  showLogin();
+});
+
+els.accountForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const auth = loadAuth();
+  const username = els.newUsernameInput.value.trim();
+  const currentPassword = els.currentPasswordInput.value;
+  const newPassword = els.newPasswordInput.value;
+  const confirmPassword = els.confirmPasswordInput.value;
+
+  els.accountMessage.textContent = "";
+  if (!username) {
+    els.accountMessage.textContent = "กรุณากรอก Username";
+    return;
+  }
+  if (!verifyPassword(currentPassword, auth)) {
+    els.accountMessage.textContent = "Password เดิมไม่ถูกต้อง";
+    return;
+  }
+  if (newPassword && newPassword.length < 6) {
+    els.accountMessage.textContent = "Password ใหม่ควรมีอย่างน้อย 6 ตัวอักษร";
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    els.accountMessage.textContent = "ยืนยัน Password ใหม่ไม่ตรงกัน";
+    return;
+  }
+
+  const nextAuth = {
+    username,
+    salt: auth.salt,
+    passwordHash: auth.passwordHash
+  };
+  if (newPassword) {
+    nextAuth.salt = createSalt();
+    nextAuth.passwordHash = hashPassword(newPassword, nextAuth.salt);
+  }
+  saveAuth(nextAuth);
+  setSession(nextAuth.username);
+  addLog("edit", `เปลี่ยนบัญชีผู้ใช้: ${auth.username} -> ${nextAuth.username}`);
+  syncAccountInputs();
+  els.accountMessage.textContent = "บันทึกบัญชีสำเร็จ";
+});
+
+els.clearLogs.addEventListener("click", () => {
+  if (!confirm("ต้องการล้าง Audit Log ทั้งหมดหรือไม่")) return;
+  state.logs = [];
+  saveState();
+  renderLogs();
+});
+
 els.expenseForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  const isEdit = Boolean(els.editingId.value);
   const payload = {
     id: els.editingId.value || createId("expense"),
     date: els.dateInput.value,
@@ -1036,12 +1297,13 @@ els.expenseForm.addEventListener("submit", (event) => {
   };
   if (!payload.title || payload.amount <= 0) return;
 
-  if (els.editingId.value) {
+  if (isEdit) {
     state.expenses = state.expenses.map((expense) => expense.id === payload.id ? payload : expense);
   } else {
     state.expenses.push(payload);
   }
   saveState();
+  if (isEdit) addLog("edit", `แก้ไขรายการ: ${payload.title}`);
   clearEdit();
   els.monthFilter.value = payload.date.slice(0, 7);
   if (els.listScope.value === "month") els.listMonthFilter.value = payload.date.slice(0, 7);
@@ -1102,6 +1364,7 @@ els.budgetForm.addEventListener("submit", (event) => {
     delete state.annualBudgets[year];
   }
   saveState();
+  addLog("edit", annualBudget > 0 ? `ตั้งงบรายปี ${year}: ${money(annualBudget)}` : `ล้างงบรายปี ${year}`);
   render();
 });
 
@@ -1114,6 +1377,7 @@ els.clearBudget.addEventListener("click", () => {
     .filter((key) => key.startsWith(`${year}-`))
     .forEach((key) => delete state.budgets[key]);
   saveState();
+  addLog("delete", `ล้างงบรายปี ${year}`);
   render();
 });
 
@@ -1151,8 +1415,10 @@ els.prevMonth.addEventListener("click", () => shiftMonth(-1));
 els.nextMonth.addEventListener("click", () => shiftMonth(1));
 els.clearAll.addEventListener("click", () => {
   if (!confirm("ต้องการล้างรายการค่าใช้จ่ายทั้งหมดหรือไม่")) return;
+  const count = state.expenses.length;
   state.expenses = [];
   saveState();
+  addLog("delete", `ล้างรายการทั้งหมด ${count} รายการ`);
   clearEdit();
   render();
 });
@@ -1176,4 +1442,4 @@ function shiftMonth(delta) {
   render();
 }
 
-render();
+requireAuth();

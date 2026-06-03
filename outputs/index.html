@@ -7,7 +7,25 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <main class="shell">
+    <section class="auth-screen" id="loginScreen">
+      <form class="auth-card" id="loginForm" novalidate>
+        <p class="eyebrow">CompanyExpenses</p>
+        <h1>เข้าสู่ระบบ</h1>
+        <label>
+          Username
+          <input id="loginUsername" type="text" autocomplete="username" required>
+        </label>
+        <label>
+          Password
+          <input id="loginPassword" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="primary-button" type="submit">Login</button>
+        <p class="auth-message" id="loginMessage" aria-live="polite"></p>
+        <p class="auth-hint">ค่าเริ่มต้น: admin / admin123</p>
+      </form>
+    </section>
+
+    <main class="shell is-hidden" id="appShell">
       <header class="topbar">
         <div>
           <p class="eyebrow">Expense Ledger</p>
@@ -17,6 +35,10 @@
           <button class="icon-button" id="prevMonth" type="button" title="เดือนก่อนหน้า" aria-label="เดือนก่อนหน้า">‹</button>
           <input id="monthFilter" type="month" aria-label="เดือนที่ต้องการดู">
           <button class="icon-button" id="nextMonth" type="button" title="เดือนถัดไป" aria-label="เดือนถัดไป">›</button>
+        </div>
+        <div class="user-bar" aria-label="ผู้ใช้งานปัจจุบัน">
+          <span id="currentUserLabel">-</span>
+          <button class="ghost-button" id="logoutButton" type="button">Logout</button>
         </div>
       </header>
 
@@ -136,6 +158,30 @@
               </div>
             </form>
             <p id="budgetHint" class="budget-hint">ใช้กับเดือนที่เลือกด้านบน</p>
+          </div>
+
+          <div class="account-box">
+            <h2>บัญชีผู้ใช้</h2>
+            <form id="accountForm" class="form-stack" novalidate>
+              <label>
+                Username ใหม่
+                <input id="newUsernameInput" type="text" autocomplete="username" required>
+              </label>
+              <label>
+                Password เดิม
+                <input id="currentPasswordInput" type="password" autocomplete="current-password" required>
+              </label>
+              <label>
+                Password ใหม่
+                <input id="newPasswordInput" type="password" autocomplete="new-password" placeholder="เว้นว่างถ้าไม่เปลี่ยน">
+              </label>
+              <label>
+                ยืนยัน Password ใหม่
+                <input id="confirmPasswordInput" type="password" autocomplete="new-password">
+              </label>
+              <button class="primary-button" type="submit">บันทึกบัญชี</button>
+              <p id="accountMessage" class="budget-hint" aria-live="polite"></p>
+            </form>
           </div>
 
           <div class="status-box">
@@ -265,6 +311,27 @@
                 <span id="listPageInfo">หน้า 1 / 1</span>
                 <button class="ghost-button" id="listNext" type="button">ถัดไป</button>
               </div>
+            </div>
+          </article>
+
+          <article class="panel log-panel">
+            <div class="panel-heading">
+              <h2>Audit Log</h2>
+              <button class="ghost-button" id="clearLogs" type="button">ล้าง Log</button>
+            </div>
+            <div class="table-wrap log-wrap">
+              <table class="log-table">
+                <thead>
+                  <tr>
+                    <th>เวลา</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>รายละเอียด</th>
+                  </tr>
+                </thead>
+                <tbody id="logTable"></tbody>
+              </table>
+              <p id="logEmpty" class="empty">ยังไม่มี Audit Log</p>
             </div>
           </article>
         </section>
