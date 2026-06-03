@@ -359,6 +359,8 @@ function normalizeLogs(values) {
       id: String(log?.id || createId(`log-${index}`)),
       at: Number.isNaN(Date.parse(log?.at)) ? new Date().toISOString() : String(log.at),
       user: String(log?.user || "system"),
+      device: String(log?.device || "Unknown"),
+      userType: String(log?.userType || "").toLowerCase() === "bot" ? "Bot" : "Human",
       action: String(log?.action || "edit"),
       detail: String(log?.detail || "")
     }))
@@ -979,12 +981,62 @@ function logActionLabel(action) {
   }[action] || action;
 }
 
+function detectOperatingSystem(userAgent, platform) {
+  const source = `${userAgent} ${platform}`.toLowerCase();
+  if (source.includes("windows")) return "Windows";
+  if (source.includes("android")) return "Android";
+  if (source.includes("iphone") || source.includes("ipad") || source.includes("ipod")) return "iOS";
+  if (source.includes("mac")) return "macOS";
+  if (source.includes("linux")) return "Linux";
+  return platform || "Unknown OS";
+}
+
+function detectBrowser(userAgent) {
+  if (/edg\//i.test(userAgent)) return "Edge";
+  if (/opr\//i.test(userAgent)) return "Opera";
+  if (/chrome|crios/i.test(userAgent) && !/edg\//i.test(userAgent)) return "Chrome";
+  if (/firefox|fxios/i.test(userAgent)) return "Firefox";
+  if (/safari/i.test(userAgent) && !/chrome|crios|chromium/i.test(userAgent)) return "Safari";
+  return "Unknown Browser";
+}
+
+function detectDeviceType(userAgent) {
+  const platform = navigator.platform || "";
+  const iPadLike = platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1;
+  if (/ipad|tablet/i.test(userAgent) || iPadLike) return "Tablet";
+  if (navigator.userAgentData?.mobile || /mobi|android|iphone|ipod/i.test(userAgent)) return "Mobile";
+  return "Desktop";
+}
+
+function detectUserType(userAgent) {
+  const botPattern = /(bot|crawler|spider|crawling|slurp|bingpreview|facebookexternalhit|telegrambot|headless|phantomjs|lighthouse|pagespeed|curl|wget|python-requests|postmanruntime|playwright|puppeteer)/i;
+  if (!userAgent || navigator.webdriver || botPattern.test(userAgent)) return "Bot";
+  return "Human";
+}
+
+function getClientLogMeta() {
+  const userAgent = navigator.userAgent || "";
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  const device = [
+    detectDeviceType(userAgent),
+    detectBrowser(userAgent),
+    detectOperatingSystem(userAgent, platform)
+  ].filter(Boolean).join(" / ");
+  return {
+    device,
+    userType: detectUserType(userAgent)
+  };
+}
+
 function addLog(action, detail = "") {
+  const clientMeta = getClientLogMeta();
   state.logs = normalizeLogs(state.logs);
   state.logs.unshift({
     id: createId("log"),
     at: new Date().toISOString(),
     user: currentSessionUser() || "system",
+    device: clientMeta.device,
+    userType: clientMeta.userType,
     action,
     detail
   });
@@ -1000,6 +1052,8 @@ function renderLogs() {
       <tr>
         <td data-label="เวลา">${escapeHtml(formatDateTime(log.at))}</td>
         <td data-label="User">${escapeHtml(log.user)}</td>
+        <td data-label="Device">${escapeHtml(log.device)}</td>
+        <td data-label="Type"><span class="log-action ${log.userType === "Bot" ? "bot" : "human"}">${escapeHtml(log.userType)}</span></td>
         <td data-label="Action"><span class="log-action">${escapeHtml(logActionLabel(log.action))}</span></td>
         <td data-label="รายละเอียด">${escapeHtml(log.detail || "-")}</td>
       </tr>

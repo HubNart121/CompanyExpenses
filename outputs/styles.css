@@ -485,12 +485,14 @@ canvas {
 }
 
 .log-table {
-  min-width: 720px;
+  min-width: 980px;
 }
 
 .log-table td:nth-child(1),
 .log-table td:nth-child(2),
-.log-table td:nth-child(3) {
+.log-table td:nth-child(3),
+.log-table td:nth-child(4),
+.log-table td:nth-child(5) {
   white-space: nowrap;
 }
 
@@ -503,6 +505,16 @@ canvas {
   background: #eef5f3;
   color: var(--accent-strong);
   font-weight: 800;
+}
+
+.log-action.human {
+  background: #eef5f3;
+  color: var(--accent-strong);
+}
+
+.log-action.bot {
+  background: #f8eeee;
+  color: var(--red);
 }
 
 .table-actions {
