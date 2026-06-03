@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Expense Ledger Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Expense Ledger</p>
+          <h1>บันทึกและวิเคราะห์ค่าใช้จ่าย</h1>
+        </div>
+        <div class="month-switcher" aria-label="เลือกเดือน">
+          <button class="icon-button" id="prevMonth" type="button" title="เดือนก่อนหน้า" aria-label="เดือนก่อนหน้า">‹</button>
+          <input id="monthFilter" type="month" aria-label="เดือนที่ต้องการดู">
+          <button class="icon-button" id="nextMonth" type="button" title="เดือนถัดไป" aria-label="เดือนถัดไป">›</button>
+        </div>
+      </header>
+
+      <section class="range-panel" aria-label="เลือกช่วงเวลา dashboard">
+        <label>
+          ช่วงเวลา
+          <select id="rangeMode">
+            <option value="month">เดือนที่เลือก</option>
+            <option value="today">วันนี้</option>
+            <option value="7days">7 วันล่าสุด</option>
+            <option value="30days">30 วันล่าสุด</option>
+            <option value="year">ปีที่เลือก</option>
+            <option value="custom">กำหนดเอง</option>
+          </select>
+        </label>
+        <label class="custom-range">
+          จากวันที่
+          <input id="customStart" type="date">
+        </label>
+        <label class="custom-range">
+          ถึงวันที่
+          <input id="customEnd" type="date">
+        </label>
+        <span id="rangeSummary" class="range-summary">เดือนที่เลือก</span>
+      </section>
+
+      <section class="summary-grid" aria-label="สรุปค่าใช้จ่าย">
+        <article class="metric">
+          <span id="totalLabel">ยอดรวมช่วงนี้</span>
+          <strong id="totalThisMonth">฿0</strong>
+          <small id="monthChange">พร้อมเริ่มบันทึก</small>
+        </article>
+        <article class="metric">
+          <span>จำนวนรายการ</span>
+          <strong id="entryCount">0</strong>
+          <small id="averageExpense">เฉลี่ย ฿0 ต่อรายการ</small>
+        </article>
+        <article class="metric">
+          <span>หมวดที่ใช้มากสุด</span>
+          <strong id="topCategory">-</strong>
+          <small id="topCategoryAmount">฿0</small>
+        </article>
+        <article class="metric">
+          <span>ค่าใช้จ่ายวันนี้</span>
+          <strong id="todayTotal">฿0</strong>
+          <small id="todayCount">0 รายการ</small>
+        </article>
+        <article class="metric budget-metric">
+          <span>งบประมาณเดือนนี้</span>
+          <strong id="budgetRemaining">ยังไม่ตั้งงบ</strong>
+          <small id="budgetStatus">ตั้งงบเพื่อดูยอดคงเหลือ</small>
+          <div class="budget-track" aria-hidden="true">
+            <span id="budgetProgress"></span>
+          </div>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel entry-panel">
+          <div class="panel-heading">
+            <h2>เพิ่มรายการ</h2>
+            <button class="ghost-button" id="resetSample" type="button">คืนค่าตัวอย่าง</button>
+          </div>
+          <form id="expenseForm" class="form-stack" novalidate>
+            <input id="editingId" type="hidden">
+            <label>
+              วันที่
+              <input id="dateInput" type="date" required>
+            </label>
+            <label>
+              รายละเอียด
+              <input id="titleInput" type="text" placeholder="เช่น กาแฟ, ค่าเดินทาง" required>
+            </label>
+            <label>
+              Link URL
+              <input id="urlInput" type="text" inputmode="url" placeholder="https://example.com หรือ link ใบเสร็จ">
+            </label>
+            <label>
+              จำนวนเงิน
+              <input id="amountInput" type="number" min="0" step="0.01" placeholder="0.00" required>
+            </label>
+            <label>
+              หมวดหมู่
+              <select id="categoryInput" required></select>
+            </label>
+            <label>
+              วิธีจ่าย
+              <select id="methodInput">
+                <option>เงินสด</option>
+                <option>โอนเงิน</option>
+                <option>บัตรเครดิต</option>
+                <option>พร้อมเพย์</option>
+              </select>
+            </label>
+            <label>
+              Status
+              <select id="statusInput"></select>
+            </label>
+            <button class="primary-button" id="saveExpense" type="submit">บันทึกรายการ</button>
+            <button class="ghost-button hidden" id="cancelEdit" type="button">ยกเลิกการแก้ไข</button>
+          </form>
+
+          <div class="budget-box">
+            <h2>ตั้ง Budget</h2>
+            <form id="budgetForm" class="budget-form">
+              <label>
+                งบรายปี
+                <input id="annualBudgetInput" type="text" inputmode="decimal" placeholder="เช่น ฿180,000">
+              </label>
+              <label>
+                งบรายเดือน
+                <input id="budgetInput" type="text" inputmode="decimal" placeholder="คำนวณอัตโนมัติ" readonly>
+              </label>
+              <div class="budget-actions">
+                <button class="primary-button" type="submit">บันทึกงบ</button>
+                <button class="ghost-button" id="clearBudget" type="button">ล้างงบ</button>
+              </div>
+            </form>
+            <p id="budgetHint" class="budget-hint">ใช้กับเดือนที่เลือกด้านบน</p>
+          </div>
+
+          <div class="status-box">
+            <h2>Status</h2>
+            <form id="statusForm" class="category-form">
+              <input id="statusNameInput" type="text" placeholder="เพิ่ม status ใหม่" required>
+              <input id="statusColorInput" type="color" value="#d29f35" title="เลือกสี status" aria-label="เลือกสี status">
+              <button class="icon-button add" type="submit" title="เพิ่ม status" aria-label="เพิ่ม status">+</button>
+            </form>
+            <div id="statusList" class="chips" aria-live="polite"></div>
+          </div>
+
+          <div class="category-box">
+            <h2>หมวดหมู่</h2>
+            <form id="categoryForm" class="category-form">
+              <input id="categoryNameInput" type="text" placeholder="เพิ่มหมวดใหม่" required>
+              <input id="categoryColorInput" type="color" value="#2f7d78" title="เลือกสีหมวดหมู่" aria-label="เลือกสีหมวดหมู่">
+              <button class="icon-button add" type="submit" title="เพิ่มหมวดหมู่" aria-label="เพิ่มหมวดหมู่">+</button>
+            </form>
+            <div id="categoryList" class="chips" aria-live="polite"></div>
+          </div>
+        </aside>
+
+        <section class="dashboard">
+          <div class="chart-grid">
+            <article class="panel chart-panel wide">
+              <div class="panel-heading">
+                <h2 id="trendTitle">แนวโน้มตามช่วงเวลา</h2>
+                <span id="trendLabel" class="subtle"></span>
+              </div>
+              <canvas id="dailyChart" height="260" aria-label="กราฟแนวโน้มค่าใช้จ่ายรายวัน"></canvas>
+            </article>
+            <article class="panel chart-panel">
+              <div class="panel-heading">
+                <h2>สัดส่วนตามหมวด</h2>
+                <span class="subtle">บาท</span>
+              </div>
+              <canvas id="categoryChart" height="260" aria-label="กราฟโดนัทสัดส่วนตามหมวด"></canvas>
+              <div id="categoryLegend" class="legend"></div>
+            </article>
+            <article class="panel chart-panel">
+              <div class="panel-heading">
+                <h2>ช่องทางชำระเงิน</h2>
+                <span class="subtle">ยอดรวม</span>
+              </div>
+              <canvas id="methodChart" height="260" aria-label="กราฟค่าใช้จ่ายตามช่องทางชำระเงิน"></canvas>
+            </article>
+          </div>
+
+          <article class="panel table-panel">
+            <div class="panel-heading">
+              <h2>รายการล่าสุด</h2>
+              <div class="table-actions">
+                <button class="ghost-button" id="exportExcel" type="button">Export Excel</button>
+                <button class="ghost-button" id="backupJson" type="button">Backup JSON</button>
+                <button class="ghost-button" id="uploadJson" type="button">Upload JSON</button>
+                <input class="hidden-file" id="jsonFileInput" type="file" accept=".json,application/json">
+                <button class="danger-button" id="clearAll" type="button">ล้างทั้งหมด</button>
+              </div>
+            </div>
+            <div class="list-controls" aria-label="ตัวกรองรายการ">
+              <label>
+                แบ่ง List
+                <select id="listScope">
+                  <option value="dashboard">ตาม Dashboard</option>
+                  <option value="month">รายเดือน</option>
+                  <option value="year">รายปี</option>
+                  <option value="all">ทั้งหมด</option>
+                </select>
+              </label>
+              <label id="listMonthField">
+                เดือน
+                <input id="listMonthFilter" type="month">
+              </label>
+              <label id="listYearField">
+                ปี
+                <input id="listYearFilter" type="number" min="1900" max="2999" step="1">
+              </label>
+              <label>
+                หมวด
+                <select id="listCategoryFilter"></select>
+              </label>
+              <label>
+                Status
+                <select id="listStatusFilter"></select>
+              </label>
+              <label>
+                วิธีจ่าย
+                <select id="listMethodFilter"></select>
+              </label>
+              <label class="list-search">
+                ค้นหา
+                <input id="searchInput" type="search" placeholder="ค้นหารายการ">
+              </label>
+              <label>
+                ต่อหน้า
+                <select id="listPageSize">
+                  <option value="10">10</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>วันที่</th>
+                    <th>รายการ</th>
+                    <th>หมวด</th>
+                    <th>วิธีจ่าย</th>
+                    <th>Status</th>
+                    <th>ลิงก์</th>
+                    <th class="amount-col">จำนวนเงิน</th>
+                    <th>จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody id="expenseTable"></tbody>
+              </table>
+              <p id="emptyState" class="empty">ยังไม่มีรายการในช่วงนี้</p>
+            </div>
+            <div class="list-footer">
+              <span id="listMeta">0 รายการ</span>
+              <div class="pagination">
+                <button class="ghost-button" id="listPrev" type="button">ก่อนหน้า</button>
+                <span id="listPageInfo">หน้า 1 / 1</span>
+                <button class="ghost-button" id="listNext" type="button">ถัดไป</button>
+              </div>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
