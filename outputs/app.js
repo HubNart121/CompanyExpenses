@@ -1,6 +1,8 @@
 const STORAGE_KEY = "expense-ledger-v1";
 const AUTH_KEY = "expense-ledger-auth-v1";
 const SESSION_KEY = "expense-ledger-session-v1";
+const IP_CACHE_KEY = "expense-ledger-client-ip-v1";
+const IP_LOOKUP_URL = "https://api.ipify.org?format=json";
 const DEFAULT_AUTH = Object.freeze({
   username: "admin",
   salt: "expense-ledger-default",
@@ -54,6 +56,7 @@ const sampleExpenses = [
 
 let state = loadState();
 let listPage = 1;
+let clientIp = loadCachedClientIp();
 
 const els = {
   loginScreen: document.querySelector("#loginScreen"),
@@ -157,6 +160,7 @@ els.customStart.value = isoDate(addDays(today, -29));
 els.customEnd.value = isoDate(today);
 els.expenseForm.noValidate = true;
 els.urlInput.type = "text";
+refreshClientIp();
 
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -175,6 +179,48 @@ function saveState() {
 function createId(prefix) {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function normalizeIp(value) {
+  const ip = String(value || "").trim();
+  return /^[0-9a-f:.]+$/i.test(ip) && ip.length <= 45 ? ip : "Unavailable";
+}
+
+function loadCachedClientIp() {
+  try {
+    return normalizeIp(sessionStorage.getItem(IP_CACHE_KEY));
+  } catch {
+    return "Unavailable";
+  }
+}
+
+function saveCachedClientIp(ip) {
+  try {
+    sessionStorage.setItem(IP_CACHE_KEY, normalizeIp(ip));
+  } catch {
+    // Session storage may be blocked in private modes; logs can still work.
+  }
+}
+
+async function refreshClientIp() {
+  if (!globalThis.fetch) return clientIp;
+  const controller = globalThis.AbortController ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 1500) : null;
+  try {
+    const response = await fetch(IP_LOOKUP_URL, {
+      cache: "no-store",
+      signal: controller?.signal
+    });
+    if (!response.ok) return clientIp;
+    const data = await response.json();
+    clientIp = normalizeIp(data?.ip);
+    saveCachedClientIp(clientIp);
+  } catch {
+    clientIp = normalizeIp(clientIp);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+  return clientIp;
 }
 
 function hashPassword(password, salt) {
@@ -361,6 +407,7 @@ function normalizeLogs(values) {
       at: Number.isNaN(Date.parse(log?.at)) ? new Date().toISOString() : String(log.at),
       user: String(log?.user || "system"),
       device: String(log?.device || "Unknown"),
+      ip: normalizeIp(log?.ip || log?.clientIp || ""),
       userType: String(log?.userType || "").toLowerCase() === "bot" ? "Bot" : "Human",
       action: String(log?.action || "edit"),
       detail: String(log?.detail || "")
@@ -1025,6 +1072,7 @@ function getClientLogMeta() {
   ].filter(Boolean).join(" / ");
   return {
     device,
+    ip: normalizeIp(clientIp),
     userType: detectUserType(userAgent)
   };
 }
@@ -1037,6 +1085,7 @@ function addLog(action, detail = "") {
     at: new Date().toISOString(),
     user: currentSessionUser() || "system",
     device: clientMeta.device,
+    ip: clientMeta.ip,
     userType: clientMeta.userType,
     action,
     detail
@@ -1054,6 +1103,7 @@ function renderLogs() {
         <td data-label="เวลา">${escapeHtml(formatDateTime(log.at))}</td>
         <td data-label="User">${escapeHtml(log.user)}</td>
         <td data-label="Device">${escapeHtml(log.device)}</td>
+        <td data-label="IP">${escapeHtml(log.ip)}</td>
         <td data-label="Type"><span class="log-action ${log.userType === "Bot" ? "bot" : "human"}">${escapeHtml(log.userType)}</span></td>
         <td data-label="Action"><span class="log-action">${escapeHtml(logActionLabel(log.action))}</span></td>
         <td data-label="รายละเอียด">${escapeHtml(log.detail || "-")}</td>
@@ -1229,6 +1279,7 @@ function exportLogsToExcel() {
         <td>${escapeHtml(formatDateTime(log.at))}</td>
         <td>${escapeHtml(log.user)}</td>
         <td>${escapeHtml(log.device)}</td>
+        <td>${escapeHtml(log.ip)}</td>
         <td>${escapeHtml(log.userType)}</td>
         <td>${escapeHtml(logActionLabel(log.action))}</td>
         <td>${escapeHtml(log.detail || "-")}</td>
@@ -1261,13 +1312,14 @@ function exportLogsToExcel() {
               <th>เวลา</th>
               <th>User</th>
               <th>Device</th>
+              <th>IP</th>
               <th>Type</th>
               <th>Action</th>
               <th>รายละเอียด</th>
             </tr>
           </thead>
           <tbody>
-            ${rows || "<tr><td colspan=\"7\">ยังไม่มี Audit Log</td></tr>"}
+            ${rows || "<tr><td colspan=\"8\">ยังไม่มี Audit Log</td></tr>"}
           </tbody>
         </table>
       </body>
@@ -1329,7 +1381,7 @@ function uploadJsonBackup(file) {
   reader.readAsText(file);
 }
 
-els.loginForm.addEventListener("submit", (event) => {
+els.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const auth = loadAuth();
   const username = els.loginUsername.value.trim();
@@ -1337,6 +1389,7 @@ els.loginForm.addEventListener("submit", (event) => {
   if (username === auth.username && verifyPassword(password, auth)) {
     setSession(auth.username);
     els.loginForm.reset();
+    await refreshClientIp();
     addLog("login", "เข้าสู่ระบบ");
     showApp();
     return;
